@@ -1,5 +1,7 @@
 'use strict';
 
+const atomic = require('../database/atomic-context');
+
 module.exports = function (opts) {
 	const { LRUCache } = require('lru-cache');
 	const os = require('os');
@@ -67,7 +69,7 @@ module.exports = function (opts) {
 	});
 
 	cache.has = function (key) {
-		if (!cache.enabled) {
+		if (!cache.enabled || atomic.current()) {
 			return false;
 		}
 
@@ -75,7 +77,7 @@ module.exports = function (opts) {
 	};
 
 	cache.set = function (key, value, ttl) {
-		if (!cache.enabled) {
+		if (!cache.enabled || atomic.current()) {
 			return;
 		}
 		const opts = {};
@@ -86,7 +88,7 @@ module.exports = function (opts) {
 	};
 
 	cache.get = function (key, loader) {
-		if (!cache.enabled) {
+		if (!cache.enabled || atomic.current()) {
 			return loader ?
 				Promise.resolve().then(loader) :
 				undefined;
@@ -112,9 +114,9 @@ module.exports = function (opts) {
 	};
 
 	cache.getMany = function (keys, loader) {
-		if (!cache.enabled) {
+		if (!cache.enabled || atomic.current()) {
 			return loader ?
-				Promise.resolve().then(() => loader(keys)) :
+				Promise.resolve().then(() => loader(keys, Array.from(keys.keys()))) :
 				keys.map(() => undefined);
 		}
 
@@ -153,7 +155,8 @@ module.exports = function (opts) {
 	};
 
 	cache.del = function (keys) {
-		if (!cache.enabled) {
+		if (atomic.defer(() => cache.del(keys))) return;
+		if (!cache.enabled || atomic.current()) {
 			return;
 		}
 		if (!Array.isArray(keys)) {
@@ -168,6 +171,7 @@ module.exports = function (opts) {
 	cache.delete = cache.del;
 
 	cache.reset = function () {
+		if (atomic.defer(() => cache.reset())) return;
 		pubsub.publish(`${cache.name}:lruCache:reset`, {
 			id: `${os.hostname()}:${process.pid}`,
 		});
@@ -212,7 +216,7 @@ module.exports = function (opts) {
 	};
 
 	cache.peek = function (key) {
-		return lruCache.peek(key);
+		return atomic.current() ? undefined : lruCache.peek(key);
 	};
 
 	tracker.addCache(opts.name, cache);

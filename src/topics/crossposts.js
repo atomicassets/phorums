@@ -63,6 +63,11 @@ Crossposts.syncCrosspostedTopicCids = async function (crossposts, topicData) {
 	if (!crossposts.length || topicData.pinned) {
 		return;
 	}
+	if (!require('../mutations').available()) {
+		// A read has no verified authorization, so the repair waits for a write.
+		winston.verbose(`[topics/crossposts] skipping crosspost score repair for tid ${topicData.tid} without a verified mutation context`);
+		return;
+	}
 
 	const cids = crossposts.map(crosspost => crosspost.cid);
 	const count = cids.length;
@@ -237,9 +242,9 @@ Crossposts.remove = async function (tid, cid, uid) {
 		categories.onTopicsMoved([cid]),
 	]);
 
-	topics.events.find(tid, { uid, toCid: cid, type: 'crosspost' }).then((eventIds) => {
-		topics.events.purge(tid, eventIds);
-	}).catch(err => winston.error(err));
+	// The event purge is part of the removal, so it commits with it.
+	const eventIds = await topics.events.find(tid, { uid, toCid: cid, type: 'crosspost' });
+	await topics.events.purge(tid, eventIds);
 
 	crossposts = await Crossposts.get(tid);
 	return crossposts;

@@ -414,4 +414,6 @@ Categories.buildForSelectCategories = function (categories, fields, parentCid) {
 	return categoriesData.map(category => _.pick(category, pickFields));
 };
 
+require('../mutations').guard(Categories, 'categories', ['create', 'update', 'purge', 'copySettingsFrom', 'copyPrivilegesFrom']);
+
 require('../promisify')(Categories);

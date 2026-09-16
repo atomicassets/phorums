@@ -59,4 +59,7 @@ primaryDB.sessionStoreDestroy = function (sid) {
 	return promisifySessionStoreMethod('destroy', sid);
 };
 
+require('../mutations/storage')(primaryDB);
+require('../promisify')(primaryDB, ['client', 'sessionStore', 'pool', 'transaction', 'atomic']);
+
 module.exports = primaryDB;

@@ -2,6 +2,7 @@
 
 const EventEmitter = require('events');
 const nconf = require('nconf');
+const atomic = require('./database/atomic-context');
 
 let real;
 let noCluster;
@@ -57,7 +58,7 @@ function get() {
 
 module.exports = {
 	publish: function (event, data) {
-		get().publish(event, data);
+		if (!atomic.defer(() => get().publish(event, data))) get().publish(event, data);
 	},
 	on: function (event, callback) {
 		get().on(event, callback);

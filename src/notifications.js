@@ -7,6 +7,7 @@ const nconf = require('nconf');
 const _ = require('lodash');
 
 const db = require('./database');
+const atomicContext = require('./database/atomic-context');
 const User = require('./user');
 const categories = require('./categories');
 const posts = require('./posts');
@@ -218,7 +219,7 @@ Notifications.push = async function (notification, uids) {
 		return;
 	}
 
-	setTimeout(() => {
+	const schedule = () => setTimeout(() => {
 		batch.processArray(uids, async (uids) => {
 			await pushToUids(uids, notification);
 		}, { interval: 1000, batch: 500 }, (err) => {
@@ -227,6 +228,7 @@ Notifications.push = async function (notification, uids) {
 			}
 		});
 	}, 500);
+	if (!atomicContext.defer(schedule)) schedule();
 };
 
 async function pushToUids(uids, notification) {

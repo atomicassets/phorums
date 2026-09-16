@@ -275,4 +275,16 @@ Groups.existsBySlug = async function (slug) {
 	return await db.isObjectField('groupslug:groupname', slug);
 };
 
+require('../mutations').guard(Groups, 'groups', ['create', 'destroy', 'join', 'leave', 'leaveAllGroups', 'kick', 'update']);
+
+// Pending and invited sets decide who may enter a group, so each membership
+// transition needs its own action instead of a broad group storage authorization.
+require('../mutations').guard(Groups, 'groups', ['requestMembership', 'acceptMembership', 'rejectMembership', 'invite']);
+
+// Cover updates perform filesystem work before their database writes. Keep
+// them unavailable until that side effect has an operation-specific audit.
+require('../mutations').guard(Groups, 'groups', ['updateCover', 'updateCoverPosition', 'removeCover'], { unsupported: true });
+
+require('../mutations').guard(Groups.ownership, 'groups.ownership', ['grant', 'rescind']);
+
 require('../promisify')(Groups);

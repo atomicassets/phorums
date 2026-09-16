@@ -6,6 +6,7 @@ const winston = require('winston');
 const tokenizer = require('sbd');
 
 const db = require('../database');
+const atomicContext = require('../database/atomic-context');
 const utils = require('../utils');
 const slugify = require('../slugify');
 const plugins = require('../plugins');
@@ -182,7 +183,7 @@ module.exports = function (Topics) {
 		plugins.hooks.fire('action:topic.post', { topic: topicData, post: postData, data: data });
 
 		if (!topicData.scheduled && !topicData.deleted) {
-			setImmediate(() => {
+			atomicContext.detach(() => {
 				user.notifications.sendTopicNotificationToFollowers(uid, topicData, postData)
 					.catch(err => winston.error(err.stack));
 			});
@@ -232,11 +233,11 @@ module.exports = function (Topics) {
 		}
 
 		if (parseInt(uid, 10) || activitypub.helpers.isUri(uid)) {
-			user.setUserField(uid, 'lastonline', Date.now());
+			await user.setUserField(uid, 'lastonline', Date.now());
 		}
 
 		if (parseInt(uid, 10) || activitypub.helpers.isUri(uid) || meta.config.allowGuestReplyNotifications) {
-			setImmediate(async () => {
+			atomicContext.detach(async () => {
 				try {
 					await Topics.notifyFollowers(postData, uid, {
 						type: 'new-reply',
@@ -266,7 +267,8 @@ module.exports = function (Topics) {
 			Topics.markAsRead([tid], uid),
 		]);
 		if (utils.isNumber(postOwner) && postData.category.cid === -1) {
-			activitypub.notes.syncUserInboxes(tid, uid);
+			// Inbox synchronization is database-only, so it belongs to this write.
+			await activitypub.notes.syncUserInboxes(tid, uid);
 		}
 
 		// Returned data is a superset of post summary data

@@ -783,3 +783,9 @@ usersAPI.generateExport = async (caller, { uid, type }) => {
 		});
 	});
 };
+
+// Mute and unmute write their user record and moderation history here rather than
+// through a core method, so the guard sits on the entrypoint ahead of its first
+// write. The action names stay in the `user` namespace with the other core
+// moderation surfaces.
+require('../mutations').guard(usersAPI, 'user', ['mute', 'unmute']);

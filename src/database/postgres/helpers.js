@@ -1,5 +1,7 @@
 'use strict';
 
+const atomic = require('../atomic-context');
+
 const helpers = module.exports;
 
 helpers.valueToString = function (value) {
@@ -77,6 +79,9 @@ FROM UNNEST($1::TEXT[]) k
 };
 
 async function tryUpsert(db, queryConfig) {
+	// Parallel adapter calls share the outer transaction. Their savepoints
+	// would overlap, so an atomic mutation must retry as a complete unit.
+	if (atomic.current()) return db.query(queryConfig);
 	let res;
 	const savepoint = `upsert_${Math.random().toString(36).substring(7)}`;
 	try {

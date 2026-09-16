@@ -5,6 +5,8 @@ const plugins = require('.');
 const utils = require('../utils');
 const als = require('../als');
 
+const atomic = require('../database/atomic-context');
+
 const Hooks = module.exports;
 
 Hooks._deprecated = new Map([
@@ -93,6 +95,7 @@ Hooks.unregister = function (id, hook, method) {
 };
 
 Hooks.fire = async function (hook, params) {
+	if (hook.startsWith('action:') && atomic.defer(() => Hooks.fire(hook, params))) return;
 	const hookList = plugins.loadedHooks[hook];
 	const hookType = hook.split(':')[0];
 	if (process.env.NODE_ENV === 'development' && hook !== 'action:plugins.firehook' && hook !== 'filter:plugins.firehook') {
