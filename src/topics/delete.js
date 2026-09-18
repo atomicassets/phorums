@@ -1,8 +1,10 @@
 'use strict';
 
 const _ = require('lodash');
+const winston = require('winston');
 
 const db = require('../database');
+const atomicContext = require('../database/atomic-context');
 const user = require('../user');
 const posts = require('../posts');
 const categories = require('../categories');
@@ -26,9 +28,14 @@ module.exports = function (Topics) {
 				deletedTimestamp: Date.now(),
 			}),
 		]);
+		// Federation delivery cannot be recalled, so it waits for the commit that
+		// makes the deletion real. Outside a mutation it runs on the next immediate.
+		atomicContext.detach(() => {
+			activitypub.out.remove.context(uid, tid)
+				.catch(err => winston.error(err.stack));
+		});
 		await Promise.all([
 			resolveTopicPostFlags(pids, uid),
-			activitypub.out.remove.context(uid, tid),
 			categories.updateRecentTidForCid(cid),
 			posts.getQueuedPosts({ tid }).then(items =>
 				Promise.all(items.map(item => posts.removeFromQueue(item.id)))),

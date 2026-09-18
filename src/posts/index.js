@@ -117,4 +117,10 @@ Posts.clearDeletedPostContent = function (post) {
 	}
 };
 
+require('../mutations').guard(Posts, 'posts', ['create', 'edit', 'delete', 'restore', 'purge', 'setPostField', 'setPostFields', 'upvote', 'downvote', 'unvote', 'bookmark', 'unbookmark', 'changeOwner']);
+
 require('../promisify')(Posts);
+
+require('../mutations').guard(Posts, 'posts', ['addToQueue', 'removeFromQueue', 'submitFromQueue', 'editQueuedContent', 'updateQueuedPostsTopic'], { unsupported: true });
+require('../mutations').guard(Posts.uploads, 'posts.uploads', ['sync', 'associate', 'dissociate', 'dissociateAll', 'saveSize']);
+require('../mutations').guard(Posts.uploads, 'posts.uploads', ['cleanOrphans', 'deleteFromDisk'], { unsupported: true });

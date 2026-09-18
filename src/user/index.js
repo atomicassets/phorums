@@ -317,4 +317,30 @@ User.addInterstitials = function (callback) {
 	callback();
 };
 
+// Account removal erases uploaded files and profile folders from disk and revokes
+// live sessions before its database writes commit. Keep both entrypoints
+// unavailable until those side effects have an operation-specific audit.
+require('../mutations').guard(User, 'user', ['deleteContent', 'deleteAccount'], { unsupported: true });
+
+require('../mutations').guard(User.bans, 'user.bans', ['unban']);
+
+// A ban delivers its notification email inside the write path, and a rollback
+// cannot recall a sent message.
+require('../mutations').guard(User.bans, 'user.bans', ['ban'], { unsupported: true });
+
 require('../promisify')(User);
+
+require('../mutations').guard(User, 'user', ['appendModerationNote', 'setModerationNote', 'deleteModerationNote']);
+
+// Upload association commits a reference to a file validated outside the
+// transaction, and its removal counterpart is itself unaudited. Keep the pair
+// unavailable until the upload lifecycle has an operation-specific audit.
+require('../mutations').guard(User, 'user', ['associateUpload', 'deleteUpload'], { unsupported: true });
+
+// Cover and avatar changes write image files and the profile picture index
+// before their database writes commit. Keep them unavailable until those side
+// effects have an operation-specific audit.
+require('../mutations').guard(User, 'user', [
+	'updateCoverPicture', 'updateCoverPosition', 'uploadCroppedPictureFile',
+	'uploadCroppedPicture', 'removeCoverPicture', 'removeProfileImage',
+], { unsupported: true });

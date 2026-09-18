@@ -341,4 +341,16 @@ Topics.search = async function (tid, term) {
 	return Array.isArray(result) ? result : result.ids;
 };
 
+require('../mutations').guard(Topics, 'topics', ['create', 'post', 'reply', 'delete', 'restore', 'purge', 'purgePostsAndTopic', 'createTopicFromPosts', 'movePostToTopic', 'merge', 'setTopicField', 'setTopicFields', 'addTags', 'removeTags', 'updateTopicTags', 'deleteTopicTags', 'deleteTags']);
+
+require('../mutations').guard(Topics.tools, 'topics.tools', ['delete', 'restore', 'purge', 'lock', 'unlock', 'pin', 'unpin', 'move', 'orderPinnedTopics', 'share', 'setPinExpiry']);
+
+// Thumb, event and crosspost records reach canonical topic and category storage
+// without passing a topic-level guard, so each surface carries its own action.
+require('../mutations').guard(Topics.thumbs, 'topics.thumbs', ['associate', 'delete']);
+require('../mutations').guard(Topics.events, 'topics.events', ['purge']);
+require('../mutations').guard(Topics.crossposts, 'topics.crossposts', ['add', 'remove', 'removeAll']);
+
 require('../promisify')(Topics);
+
+require('../mutations').guard(Topics, 'topics', ['toggleFollow', 'follow', 'unfollow', 'ignore', 'markAsRead', 'markAllRead', 'markTopicNotificationsRead', 'markUnread', 'markAsUnreadForAll', 'setUserBookmark', 'updateTopicBookmarks', 'followTag', 'unfollowTag', 'createTags', 'createEmptyTag', 'renameTags', 'deleteTag', 'updateCategoryTagsCount']);

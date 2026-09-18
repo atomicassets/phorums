@@ -1,6 +1,7 @@
 'use strict';
 
 const _ = require('lodash');
+const winston = require('winston');
 
 const db = require('../database');
 const topics = require('.');
@@ -139,6 +140,11 @@ module.exports = function (Topics) {
 
 		tids = await Promise.all(tids.map(async (tid, idx) => {
 			if (expiry[idx] && parseInt(expiry[idx], 10) <= now) {
+				if (!require('../mutations').available()) {
+					// A listing has no verified authorization, so the unpin waits for a write.
+					winston.verbose(`[topics/tools] skipping pin expiry for tid ${tid} without a verified mutation context`);
+					return tid;
+				}
 				await togglePin(tid, 'system', false);
 				return null;
 			}
@@ -294,9 +300,9 @@ module.exports = function (Topics) {
 			Topics.events.log(tid, { type: 'move', uid: data.uid, fromCid: oldCid }),
 		]);
 
-		// Update entry in recent topics zset — must come after hash update
+		// Update entry in recent topics zset, which must come after the hash update
 		if (oldCid === -1 || cid === -1) {
-			Topics.updateRecent(tid, topicData.lastposttime); // no await req'd
+			await Topics.updateRecent(tid, topicData.lastposttime);
 		}
 
 		const hookData = _.clone(data);

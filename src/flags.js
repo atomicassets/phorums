@@ -499,6 +499,7 @@ Flags.create = async function (type, id, uid, reason, timestamp, forceFlag = fal
 	const flagObj = await Flags.get(flagId);
 
 	if (notifyRemote && activitypub.helpers.isUri(id)) {
+		if (require('./database/atomic-context').current()) throw new Error('Remote flag effects are unavailable inside atomic mutations');
 		activitypub.out.flag(uid, { ...flagObj, reason });
 	}
 
@@ -592,6 +593,7 @@ Flags.addReport = async function (flagId, type, id, uid, reason, timestamp, targ
 	]);
 
 	if (notifyRemote && activitypub.helpers.isUri(id)) {
+		if (require('./database/atomic-context').current()) throw new Error('Remote flag effects are unavailable inside atomic mutations');
 		await activitypub.out.flag(uid, { flagId, type, targetId: id, targetUid, uid, reason, timestamp });
 	}
 
@@ -1133,4 +1135,9 @@ async function mergeUsernameEmailChanges(history, targetUid, uids) {
 	}, []));
 }
 
+require('./mutations').guard(Flags, 'flags', ['create', 'update', 'resolveFlag', 'resolveUserPostFlags', 'appendNote']);
+
 require('./promisify')(Flags);
+
+require('./mutations').guard(Flags, 'flags', ['deleteNote', 'appendHistory', 'addReport']);
+require('./mutations').guard(Flags, 'flags', ['purge', 'rescindReport'], { unsupported: true });

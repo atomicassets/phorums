@@ -1,7 +1,20 @@
 'use strict';
 
+const context = require('../atomic-context');
+
 module.exports = function (module) {
 	module.transaction = async function (perform, txClient) {
+		const scope = context.current();
+		if (scope) {
+			if (scope.closed) throw new Error('Atomic mutation context is closed');
+			if (txClient && txClient !== scope.client) throw new Error('Atomic mutation client mismatch');
+			try {
+				return await perform(scope.client);
+			} catch (err) {
+				scope.failure = err;
+				throw err;
+			}
+		}
 		let res;
 		if (txClient) {
 			await txClient.query(`SAVEPOINT nodebb_subtx`);

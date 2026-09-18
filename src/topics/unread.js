@@ -4,8 +4,10 @@
 const async = require('async');
 const _ = require('lodash');
 const validator = require('validator');
+const winston = require('winston');
 
 const db = require('../database');
+const atomicContext = require('../database/atomic-context');
 const user = require('../user');
 const posts = require('../posts');
 const notifications = require('../notifications');
@@ -287,12 +289,19 @@ module.exports = function (Topics) {
 		if (!uid || parseInt(uid, 10) <= 0) {
 			return;
 		}
-		const results = await Topics.getUnreadTids({ uid: uid, count: true });
-		require('../socket.io').in(`uid_${uid}`).emit('event:unread.updateCount', {
-			unreadTopicCount: results[''],
-			unreadNewTopicCount: results.new,
-			unreadWatchedTopicCount: results.watched,
-			unreadUnrepliedTopicCount: results.unreplied,
+		// The emitted count must reflect committed state, and a rollback emits nothing.
+		atomicContext.detach(async () => {
+			try {
+				const results = await Topics.getUnreadTids({ uid: uid, count: true });
+				require('../socket.io').in(`uid_${uid}`).emit('event:unread.updateCount', {
+					unreadTopicCount: results[''],
+					unreadNewTopicCount: results.new,
+					unreadWatchedTopicCount: results.watched,
+					unreadUnrepliedTopicCount: results.unreplied,
+				});
+			} catch (err) {
+				winston.error(err.stack);
+			}
 		});
 	};
 
@@ -353,7 +362,8 @@ module.exports = function (Topics) {
 		const nids = await user.notifications.getUnreadByField(uid, 'tid', tids);
 		if (nids.length) {
 			await notifications.markReadMultiple(nids, uid);
-			await user.notifications.pushCount(uid);
+			// The count is recomputed and emitted after the read markers commit.
+			atomicContext.detach(() => user.notifications.pushCount(uid));
 		}
 	};
 

@@ -50,6 +50,7 @@ postgresModule.init = async function (opts) {
 	const { Pool } = require('pg');
 	const connOptions = connection.getConnectionOptions(opts);
 	const pool = new Pool(connOptions);
+	require('./postgres/atomic')(postgresModule, pool);
 	postgresModule.pool = pool;
 	postgresModule.client = pool;
 	const client = await pool.connect();
@@ -404,4 +405,4 @@ require('./postgres/sorted')(postgresModule);
 require('./postgres/list')(postgresModule);
 require('./postgres/transaction')(postgresModule);
 
-require('../promisify')(postgresModule, ['client', 'sessionStore', 'pool', 'transaction']);
+require('../promisify')(postgresModule, ['client', 'sessionStore', 'pool', 'transaction', 'atomic']);
