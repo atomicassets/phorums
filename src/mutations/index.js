@@ -5,6 +5,8 @@ const nconf = require('nconf');
 const scope = new AsyncLocalStorage();
 const evidenceScope = new AsyncLocalStorage();
 
+exports.capabilities = Object.freeze({ postHistory: true });
+
 function required() {
 	return nconf.get('mutations:requiredPlugin');
 }
