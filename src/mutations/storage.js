@@ -11,6 +11,27 @@ const protectedKey = key => typeof key === 'string' && (
 	/^uid:[^:]+:(?:groups|upvote|downvote|bookmarks|uploads|moderation|posts|topics|cids|crossposts)(?::|$)/.test(key) ||
 	/^uid:[^:]+:(?:unbans|unban|bans|ban|unmutes|unmute|mutes|mute)(?::|$)/.test(key)
 );
+// Two frozen core tables name writes that stay outside the policy boundary by
+// design. `telemetry` holds the view counter, a statistic of anonymous events,
+// and matches its field and its delta as well as its key, so only the single
+// page-view increment passes. `derived` holds category sort
+// indexes whose score projects a `topic:<tid>` field. Neither table permits
+// removal, deletion, rename, or expiry, and a call that names any other
+// protected key still goes to the policy.
+const telemetry = Object.freeze([
+	Object.freeze({ key: /^topic:[^:]+$/, field: 'viewcount', delta: 1, methods: Object.freeze(['incrObjectFieldBy']) }),
+]);
+const derived = Object.freeze([
+	Object.freeze({
+		keys: Object.freeze([/^topics:views$/, /^cid:.+:tids:views$/, /^cid:.+:tids:posts$/, /^cid:.+:tids:votes$/]),
+		methods: Object.freeze(['sortedSetAdd', 'sortedSetsAdd', 'sortedSetAddBulk', 'sortedSetIncrBy', 'sortedSetIncrByBulk']),
+	}),
+]);
+const outsideBoundary = (name, key, args) => typeof key === 'string' && (
+	telemetry.some(entry => entry.methods.includes(name) && entry.key.test(key) &&
+		args[1] === entry.field && args[2] === entry.delta) ||
+	derived.some(entry => entry.methods.includes(name) && entry.keys.some(pattern => pattern.test(key)))
+);
 const methods = [
 	'setObject', 'setObjectBulk', 'setObjectField', 'deleteObjectField', 'deleteObjectFields',
 	'incrObjectField', 'decrObjectField', 'incrObjectFieldBy', 'incrObjectFieldByBulk',
@@ -45,7 +66,7 @@ module.exports = function (db) {
 				['delete', 'deleteAll', 'rename', 'expire', 'expireAt', 'pexpire', 'pexpireAt'].includes(name) ||
 				/"(?:flagId|banned|banned:expire|muted|mutedUntil|mutedReason|reputation)"/.test(JSON.stringify(args))
 			);
-			if (keys.some(protectedKey) || recordModeration) {
+			if (keys.some(key => protectedKey(key) && !outsideBoundary(name, key, args)) || recordModeration) {
 				await require('.').check(`database.${name}`, args);
 			}
 			return original.apply(this, args);

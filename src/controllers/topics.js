@@ -17,7 +17,6 @@ const pagination = require('../pagination');
 const utils = require('../utils');
 const analytics = require('../analytics');
 const activitypub = require('../activitypub');
-const mutations = require('../mutations');
 const translator = require('../translator');
 const cacheCreate = require('../cache/lru');
 const crosspostCache = cacheCreate({
@@ -149,7 +148,7 @@ topicsController.get = async function getTopic(req, res, next) {
 		buildBreadcrumbs(topicData),
 		addOldCategory(topicData, userPrivileges, settings.userLang),
 		addTags(topicData, req, res, currentPage, postAtIndex),
-		increaseViewCount(req, tid),
+		topics.increaseViewCount(req, tid),
 		markAsRead(req, tid),
 		analytics.increment([`pageviews:byCid:${topicData.category.cid}`]),
 	]);
@@ -215,24 +214,8 @@ function calculateStartStop(page, postIndex, settings) {
 	return { start: Math.max(0, start), stop: Math.max(0, stop) };
 }
 
-// Read-time bookkeeping is skipped rather than failed when a required policy
-// leaves it without a verified authorization.
-function skipUnverifiedWrite(what, tid) {
-	winston.verbose(`[topics] skipping ${what} for tid ${tid} without a verified mutation context`);
-}
-
-async function increaseViewCount(req, tid) {
-	if (!mutations.available()) {
-		return skipUnverifiedWrite('view count increment', tid);
-	}
-	return await topics.increaseViewCount(req, tid);
-}
-
 async function markAsRead(req, tid) {
 	if (req.loggedIn) {
-		if (!mutations.available()) {
-			return skipUnverifiedWrite('read markers', tid);
-		}
 		const markedRead = await topics.markAsRead([tid], req.uid);
 		const promises = [topics.markTopicNotificationsRead([tid], req.uid)];
 		if (markedRead) {

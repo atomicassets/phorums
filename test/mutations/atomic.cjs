@@ -214,7 +214,7 @@ test('outbox readers reject missing evidence rather than skipping it', async () 
 const entrypoints = [
 	[require('../../src/categories'), ['create', 'update', 'purge', 'copySettingsFrom', 'copyPrivilegesFrom']],
 	[require('../../src/posts'), ['addToQueue', 'removeFromQueue', 'submitFromQueue', 'editQueuedContent', 'updateQueuedPostsTopic', 'bookmark', 'unbookmark', 'create', 'edit', 'delete', 'restore', 'purge', 'upvote', 'downvote', 'unvote', 'setPostFields', 'changeOwner']],
-	[require('../../src/topics'), ['toggleFollow', 'follow', 'unfollow', 'ignore', 'markAsRead', 'markAllRead', 'markTopicNotificationsRead', 'markUnread', 'setUserBookmark', 'followTag', 'unfollowTag', 'addTags', 'removeTags', 'updateTopicTags', 'deleteTopicTags', 'deleteTags', 'post', 'reply', 'delete', 'restore', 'purge', 'merge', 'movePostToTopic', 'setTopicFields']],
+	[require('../../src/topics'), ['toggleFollow', 'follow', 'unfollow', 'ignore', 'markUnread', 'markAsUnreadForAll', 'setUserBookmark', 'followTag', 'unfollowTag', 'addTags', 'removeTags', 'updateTopicTags', 'deleteTopicTags', 'deleteTags', 'post', 'reply', 'delete', 'restore', 'purge', 'merge', 'movePostToTopic', 'setTopicFields']],
 	[require('../../src/topics').tools, ['delete', 'restore', 'purge', 'lock', 'unlock', 'pin', 'unpin', 'move', 'setPinExpiry']],
 	[require('../../src/flags'), ['create', 'update', 'resolveFlag', 'appendNote', 'purge', 'rescindReport', 'deleteNote', 'addReport', 'appendHistory']],
 	[require('../../src/groups'), ['updateCover', 'updateCoverPosition', 'removeCover', 'join', 'leave', 'create', 'destroy', 'update', 'requestMembership', 'acceptMembership', 'rejectMembership', 'invite']],
@@ -600,16 +600,100 @@ test('read-time pin expiry skips its write without a verified context', async ()
     assert.equal(String(await db.getObjectField(`topic:${tid}`, 'pinExpiry')), '1');
 });
 
-test('read-time crosspost repair skips its write without a verified context', async () => {
-    installPolicy();
-    const topics = require('../../src/topics');
-    const tid = 970000000 + Math.floor(Math.random() * 1000000);
-    const cid = 970000000 + Math.floor(Math.random() * 1000000);
-    await topics.crossposts.syncCrosspostedTopicCids(
-        [{ id: `${prefix}:crosspost`, cid, tid, uid: 1, timestamp: 1 }],
-        { tid, pinned: 0, postcount: 5, votes: 1, viewcount: 9 }
-    );
-    assert.equal(await db.sortedSetScore(`cid:${cid}:tids:posts`, tid), null);
+function installSpyPolicy() {
+	const seen = [];
+	installPolicy({ check: async (ticket, action) => { seen.push(action); return false; } });
+	return seen;
+}
+
+test('read-time crosspost repair writes its scores without a verified context', async () => {
+	const seen = installSpyPolicy();
+	const topics = require('../../src/topics');
+	const tid = 970000000 + Math.floor(Math.random() * 1000000);
+	const cid = 970000000 + Math.floor(Math.random() * 1000000);
+	await topics.crossposts.syncCrosspostedTopicCids(
+		[{ id: `${prefix}:crosspost`, cid, tid, uid: 1, timestamp: 1 }],
+		{ tid, pinned: 0, postcount: 5, votes: 1, viewcount: 9 }
+	);
+	assert.equal(await db.sortedSetScore(`cid:${cid}:tids:posts`, tid), 5);
+	assert.equal(await db.sortedSetScore(`cid:${cid}:tids:votes`, tid), 1);
+	assert.equal(await db.sortedSetScore(`cid:${cid}:tids:views`, tid), 9);
+	assert.deepEqual(seen, []);
+});
+
+test('read markers advance the reader state without a verified context or a policy call', async () => {
+	nconf.clear('mutations:requiredPlugin');
+	const topics = require('../../src/topics');
+	const tid = 960000000 + Math.floor(Math.random() * 1000000);
+	const uid = 960000000 + Math.floor(Math.random() * 1000000);
+	await db.setObject(`topic:${tid}`, { tid, cid: 1, lastposttime: 1, timestamp: 1, deleted: 0, mainPid: 0 });
+	const seen = installSpyPolicy();
+	assert.equal(await topics.markAsRead([tid], uid), true);
+	await topics.markTopicNotificationsRead([tid], uid);
+	await topics.markAllRead(uid);
+	assert.ok(await db.sortedSetScore(`uid:${uid}:tids_read`, tid) > 0);
+	assert.deepEqual(seen, []);
+});
+
+for (const [label, cid] of [['a numeric category', 950000000 + Math.floor(Math.random() * 1000000)], ['a remote category id containing colons', 'https://remote.example.invalid/category/1']]) {
+	test(`a view count increment writes without a verified context in ${label}`, async () => {
+		nconf.clear('mutations:requiredPlugin');
+		const topics = require('../../src/topics');
+		const tid = 950000000 + Math.floor(Math.random() * 1000000);
+		await db.setObject(`topic:${tid}`, { tid, cid, viewcount: 0, deleted: 0, mainPid: 0 });
+		const seen = installSpyPolicy();
+		await topics.increaseViewCount({ uid: 1, session: {} }, tid);
+		assert.equal(String(await db.getObjectField(`topic:${tid}`, 'viewcount')), '1');
+		assert.equal(await db.sortedSetScore(`cid:${cid}:tids:views`, tid), 1);
+		assert.equal(await db.sortedSetScore('topics:views', tid), typeof cid === 'number' ? 1 : null);
+		assert.deepEqual(seen, []);
+	});
+}
+
+test('writes outside the telemetry and derived tables still need a verified context', async () => {
+	installPolicy();
+	const tid = 940000000 + Math.floor(Math.random() * 1000000);
+	const cid = 940000000 + Math.floor(Math.random() * 1000000);
+	for (const operation of [
+		() => db.incrObjectFieldBy(`topic:${tid}`, 'postcount', 1),
+		() => db.setObjectField(`topic:${tid}`, 'viewcount', 5),
+		() => db.incrObjectFieldBy(`topic:${tid}`, 'viewcount', -1000),
+		() => db.incrObjectFieldBy(`topic:${tid}`, 'viewcount', 2),
+		() => db.sortedSetRemove(`cid:${cid}:tids:views`, tid),
+		() => db.sortedSetAddBulk([[`cid:${cid}:tids`, 1, tid], [`cid:${cid}:tids:views`, 1, tid]]),
+		() => db.incrObjectFieldBy(`topic:${tid}:posts`, 'viewcount', 1),
+		() => db.delete('topics:views'),
+	]) await assert.rejects(operation(), /Verified mutation context is required/);
+	assert.equal(await db.getObject(`topic:${tid}`), null);
+	assert.equal(await db.sortedSetScore(`cid:${cid}:tids`, tid), null);
+});
+
+test('telemetry and derived writes never reach the policy inside a mutation', async () => {
+	const seen = [];
+	installPolicy({ check: async (ticket, action) => { seen.push(action); return action === 'fixture.write'; } });
+	const tid = 930000000 + Math.floor(Math.random() * 1000000);
+	const cid = 930000000 + Math.floor(Math.random() * 1000000);
+	await mutations.run({ nonce: nonce() }, async () => {
+		await mutations.check('fixture.write', []);
+		await db.incrObjectFieldBy(`topic:${tid}`, 'viewcount', 1);
+		await db.sortedSetsAdd([`cid:${cid}:tids:posts`, `cid:${cid}:tids:votes`], 2, tid);
+		await db.sortedSetIncrBy(`cid:${cid}:tids:votes`, 1, tid);
+		await db.sortedSetIncrByBulk([[`cid:${cid}:tids:views`, 1, tid]]);
+	});
+	assert.deepEqual(seen, ['fixture.write']);
+	assert.equal(await db.sortedSetScore(`cid:${cid}:tids:votes`, tid), 3);
+});
+
+test('unread, follow, ignore and bookmark actions still require a verified context', async () => {
+	installPolicy();
+	const topics = require('../../src/topics');
+	for (const operation of [
+		() => topics.markUnread(1, 1),
+		() => topics.markAsUnreadForAll(1),
+		() => topics.follow(1, 1),
+		() => topics.ignore(1, 1),
+		() => topics.setUserBookmark(1, 1, 1),
+	]) await assert.rejects(operation(), /Verified mutation context is required/);
 });
 
 test('a swallowed connection refusal cannot reach a commit', async () => {
