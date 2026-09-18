@@ -40,6 +40,15 @@ unmute write paths are guarded on their API entrypoints as `user.mute` and
 so an outer operation that reaches one, such as a topic purge reaching
 `topics.events.purge` and `topics.crossposts.removeAll`, needs both.
 
+Read state is outside the guarded set. `topics.markAsRead`,
+`topics.markAllRead`, and `topics.markTopicNotificationsRead` write only the
+calling user's own `uid:<uid>:tids_read`, `uid:<uid>:tids_unread`, and
+notification read keys, and the session authenticates that user as in upstream
+NodeBB. `topics.markUnread` stays guarded because it also removes the user from
+`tid:<tid>:bookmarks`. `topics.markAsUnreadForAll` stays guarded because it
+writes the state of every user. Follow, ignore, and bookmark actions stay
+guarded because an integration reads followers.
+
 The canonical storage allowlist protects moderation history and ownership
 indexes alongside content: `users:banned`, `users:banned:expire`, `users:muted`,
 `users:flags`, the `uid:<uid>:ban*`, `unban*`, `mute*`, and `unmute*` history
@@ -47,6 +56,26 @@ keys, `uid:<uid>:posts`, `uid:<uid>:topics`, `uid:<uid>:cids`, `crosspost:*`, an
 `uid:<uid>:crossposts`. A `flagId` field on a `user:<uid>` or `message:<mid>`
 record is a moderation association and needs its own `database.<method>`
 authorization.
+
+Two frozen core tables in `src/mutations/storage.js` name writes outside the
+boundary by design. A write skips the protected key check when every protected
+key it names matches a table entry for that method. These writes never reach
+`check`, inside or outside a mutation, so a policy plan must not list them. The
+`mutation:*` evidence check and the moderated record check still run first.
+
+| Table | Keys | Fields | Methods |
+| --- | --- | --- | --- |
+| `telemetry` | `topic:<tid>` | `viewcount` | `incrObjectFieldBy` |
+| `derived` | `topics:views`, `cid:<cid>:tids:views`, `cid:<cid>:tids:posts`, `cid:<cid>:tids:votes` | any | `sortedSetAdd`, `sortedSetsAdd`, `sortedSetAddBulk`, `sortedSetIncrBy`, `sortedSetIncrByBulk` |
+
+`topic:<tid>` matches `^topic:[^:]+$`, so `topic:<tid>:posts` and other
+suffixed keys stay protected. Each `cid:<cid>` entry matches `^cid:.+:tids:<suffix>$`
+because a remote category id is `-1` or a URL that contains colons. A
+`telemetry` entry matches the field argument as well as the key, so
+`incrObjectFieldBy('topic:<tid>', 'postcount', 1)` goes to the policy. Neither
+table permits removal, deletion, rename, or expiry. A call that names any other
+protected key goes to the policy, so the unpin `sortedSetAddBulk` across
+`cid:<cid>:tids` and `cid:<cid>:tids:views` stays checked.
 
 `receipt(ticket, result)` validates the applied result and updates integration
 revision records using the same database adapter before returning a JSON
@@ -97,8 +126,9 @@ picture index: `user.updateCoverPicture`, `user.updateCoverPosition`,
 `user.removeCoverPicture`, and `user.removeProfileImage`. Unbanning, topic
 deletion, topic restoration, and `topics.tools.restore` carry no unrecalled
 external effect and stay available. Keep every one of these guards installed and
-reject the unsupported operation in the policy; removing a guard would reopen
-unsigned writes.
+reject the unsupported operation in the policy. Removing a guard would reopen
+unsigned writes. Read state and the `telemetry` and `derived` tables are the
+exceptions: they are outside the boundary by design and carry no guard.
 
 Topic deletion defers its federated Remove instead of rejecting protected
 execution. `Topics.delete` schedules the delivery through
@@ -117,13 +147,21 @@ released connection, so it is a defect rather than an optimization.
 
 ## Read routes
 
+A topic page writes its read markers, its view count, and the crosspost score
+repair without a policy. The read markers are read state outside the guarded
+set. The view count writes `topic:<tid>` field `viewcount` through the
+`telemetry` table and updates `topics:views` and `cid:<cid>:tids:views` through
+the `derived` table. The crosspost repair sets `cid:<cid>:tids:posts`,
+`cid:<cid>:tids:votes`, and `cid:<cid>:tids:views` to the canonical topic fields
+through the `derived` table, as upstream NodeBB repairs them on read.
+
+Pin expiry is the one read-route write that stays skipped. An expired pin
+changes public listing order, so its unpin belongs inside the policy.
 `mutations.available()` reports whether a write may proceed: true when no policy
-is required, and true inside an open verified context. A read route that writes
-bookkeeping asks first and skips the write when the answer is false, logging at
-verbose level rather than failing the page. This covers view counts and read
-markers on a topic page, pin expiry during a listing, and the crosspost score
-repair. The write itself keeps its guard, so the skip never becomes a bypass:
-only the read-side call site decides to do nothing.
+is required, and true inside an open verified context. `topicTools.checkPinExpiry`
+asks first and skips the unpin when the answer is false, logging at verbose level
+rather than failing the listing. The unpin keeps its guard, so the skip never
+becomes a bypass. With enforcement unset, lazy expiry runs as in upstream NodeBB.
 
 ## Outbox consumption
 
@@ -150,5 +188,6 @@ The explicit exit handles background timers loaded by core modules. Assertions
 await their transactions and deferred effects. The test covers real adapter
 rollback, cache isolation, replay concurrency, receipt failure, unsupported
 backends, plugin removal, guarded core and API entrypoints, moderation-history
-storage keys, and direct/bulk storage paths.
+storage keys, direct/bulk storage paths, and the read-route writes that stay
+outside the policy.
 The ordinary database and forum suites must also pass with enforcement unset.

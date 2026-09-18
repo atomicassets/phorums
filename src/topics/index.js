@@ -353,4 +353,4 @@ require('../mutations').guard(Topics.crossposts, 'topics.crossposts', ['add', 'r
 
 require('../promisify')(Topics);
 
-require('../mutations').guard(Topics, 'topics', ['toggleFollow', 'follow', 'unfollow', 'ignore', 'markAsRead', 'markAllRead', 'markTopicNotificationsRead', 'markUnread', 'markAsUnreadForAll', 'setUserBookmark', 'updateTopicBookmarks', 'followTag', 'unfollowTag', 'createTags', 'createEmptyTag', 'renameTags', 'deleteTag', 'updateCategoryTagsCount']);
+require('../mutations').guard(Topics, 'topics', ['toggleFollow', 'follow', 'unfollow', 'ignore', 'markUnread', 'markAsUnreadForAll', 'setUserBookmark', 'updateTopicBookmarks', 'followTag', 'unfollowTag', 'createTags', 'createEmptyTag', 'renameTags', 'deleteTag', 'updateCategoryTagsCount']);

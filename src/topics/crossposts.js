@@ -1,6 +1,5 @@
 'use strict';
 
-const winston = require('winston');
 const _ = require('lodash');
 const db = require('../database');
 const topics = require('.');
@@ -61,11 +60,6 @@ Crossposts.syncCrosspostedTopicCids = async function (crossposts, topicData) {
 	// them when the topic is read, which is cheap and only runs for crossposted topics.
 	// Pinned topics are absent from these zsets by design, so they are skipped.
 	if (!crossposts.length || topicData.pinned) {
-		return;
-	}
-	if (!require('../mutations').available()) {
-		// A read has no verified authorization, so the repair waits for a write.
-		winston.verbose(`[topics/crossposts] skipping crosspost score repair for tid ${topicData.tid} without a verified mutation context`);
 		return;
 	}
 
