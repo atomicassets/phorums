@@ -504,6 +504,52 @@ test('topic deletion defers its federated Remove until after the commit', async 
     assert.equal(await db.getObjectField(`topic:${tid}`, 'deleted'), '1');
 });
 
+test('a topic fork defers its federated Announce until after the commit', async () => {
+    const topics = require('../../src/topics');
+    const posts = require('../../src/posts');
+    const privileges = require('../../src/privileges');
+    const meta = require('../../src/meta');
+    const activitypub = require('../../src/activitypub');
+    const tid = 980000000 + Math.floor(Math.random() * 1000000);
+    const fromTid = tid + 1;
+    const pid = tid + 2;
+    const post = { pid, tid: fromTid, uid: 1, timestamp: 1, upvotes: 0, downvotes: 0, votes: 0 };
+    const stubs = [
+        [meta.config, 'minimumTitleLength', 1],
+        [meta.config, 'maximumTitleLength', 255],
+        [posts, 'getPostsFields', async () => [post]],
+        [posts, 'getPostData', async () => post],
+        [privileges.categories, 'isAdminOrMod', async () => true],
+        [privileges.posts, 'canEdit', async () => ({ flag: true })],
+        [topics, 'create', async () => tid],
+        [topics, 'updateTopicBookmarks', async () => {}],
+        [topics, 'movePostToTopic', async () => {}],
+        [topics, 'setTopicFields', async () => {}],
+        [topics.events, 'log', async () => {}],
+        [topics, 'getTopicData', async () => ({ tid })],
+        [activitypub.mocks.activities, 'create', async () => ({ activity: { id: 'fixture' } })],
+    ];
+    const calls = [];
+    stubs.push([activitypub.feps, 'announce', async (...args) => { calls.push(args); }]);
+    const originals = stubs.map(([object, name]) => object[name]);
+    nconf.clear('mutations:requiredPlugin');
+    let duringMutation;
+    try {
+        stubs.forEach(([object, name, value]) => { object[name] = value; });
+        installPolicy({ check: async () => true });
+        await mutations.run({ nonce: nonce() }, async () => {
+            await topics.createTopicFromPosts(1, 'Forked topic', [pid], fromTid, 1);
+            await new Promise(resolve => { setImmediate(resolve); });
+            duringMutation = calls.length;
+        });
+    } finally {
+        stubs.forEach(([object, name], index) => { object[name] = originals[index]; });
+    }
+    await new Promise(resolve => { setImmediate(resolve); });
+    assert.equal(duringMutation, 0);
+    assert.deepEqual(calls, [[pid, { id: 'fixture' }]]);
+});
+
 test('a guarded callback entrypoint authorizes the promise argument list', async () => {
     const seen = [];
     installPolicy({ check: async (ticket, action, args) => { seen.push({ action, args }); return false; } });
@@ -662,6 +708,8 @@ test('writes outside the telemetry and derived tables still need a verified cont
 		() => db.sortedSetRemove(`cid:${cid}:tids:views`, tid),
 		() => db.sortedSetAddBulk([[`cid:${cid}:tids`, 1, tid], [`cid:${cid}:tids:views`, 1, tid]]),
 		() => db.incrObjectFieldBy(`topic:${tid}:posts`, 'viewcount', 1),
+		() => db.incrObjectFieldBy('topic:not-a-tid', 'viewcount', 1),
+		() => db.incrObjectFieldBy(`topic:0${tid}`, 'viewcount', 1),
 		() => db.delete('topics:views'),
 	]) await assert.rejects(operation(), /Verified mutation context is required/);
 	assert.equal(await db.getObject(`topic:${tid}`), null);
@@ -673,9 +721,11 @@ test('telemetry and derived writes never reach the policy inside a mutation', as
 	installPolicy({ check: async (ticket, action) => { seen.push(action); return action === 'fixture.write'; } });
 	const tid = 930000000 + Math.floor(Math.random() * 1000000);
 	const cid = 930000000 + Math.floor(Math.random() * 1000000);
+	const uuidTid = require('node:crypto').randomUUID();
 	await mutations.run({ nonce: nonce() }, async () => {
 		await mutations.check('fixture.write', []);
 		await db.incrObjectFieldBy(`topic:${tid}`, 'viewcount', 1);
+		await db.incrObjectFieldBy(`topic:${uuidTid}`, 'viewcount', 1);
 		await db.sortedSetsAdd([`cid:${cid}:tids:posts`, `cid:${cid}:tids:votes`], 2, tid);
 		await db.sortedSetIncrBy(`cid:${cid}:tids:votes`, 1, tid);
 		await db.sortedSetIncrByBulk([[`cid:${cid}:tids:views`, 1, tid]]);

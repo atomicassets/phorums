@@ -68,8 +68,9 @@ key it names matches a table entry for that method. These writes never reach
 | `telemetry` | `topic:<tid>` | `viewcount` | `incrObjectFieldBy` |
 | `derived` | `topics:views`, `cid:<cid>:tids:views`, `cid:<cid>:tids:posts`, `cid:<cid>:tids:votes` | any | `sortedSetAdd`, `sortedSetsAdd`, `sortedSetAddBulk`, `sortedSetIncrBy`, `sortedSetIncrByBulk` |
 
-`topic:<tid>` matches `^topic:[^:]+$`, so `topic:<tid>:posts` and other
-suffixed keys stay protected. Each `cid:<cid>` entry matches `^cid:.+:tids:<suffix>$`
+`topic:<tid>` matches a positive integer or a UUID after the prefix, the two id
+shapes core assigns, so `topic:<tid>:posts`, other suffixed keys, and any other
+`topic:`-prefixed name stay protected. Each `cid:<cid>` entry matches `^cid:.+:tids:<suffix>$`
 because a remote category id is `-1` or a URL that contains colons. A
 `telemetry` entry matches the field argument as well as the key, so
 `incrObjectFieldBy('topic:<tid>', 'postcount', 1)` goes to the policy. Neither

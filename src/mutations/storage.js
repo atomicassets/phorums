@@ -14,12 +14,14 @@ const protectedKey = key => typeof key === 'string' && (
 // Two frozen core tables name writes that stay outside the policy boundary by
 // design. `telemetry` holds the view counter, a statistic of anonymous events,
 // and matches its field and its delta as well as its key, so only the single
-// page-view increment passes. `derived` holds category sort
+// page-view increment passes. Its key names one topic record by the two
+// id shapes core assigns, a positive integer or a UUID, so no other
+// `topic:`-prefixed record matches. `derived` holds category sort
 // indexes whose score projects a `topic:<tid>` field. Neither table permits
 // removal, deletion, rename, or expiry, and a call that names any other
 // protected key still goes to the policy.
 const telemetry = Object.freeze([
-	Object.freeze({ key: /^topic:[^:]+$/, field: 'viewcount', delta: 1, methods: Object.freeze(['incrObjectFieldBy']) }),
+	Object.freeze({ key: /^topic:(?:[1-9]\d*|[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i, field: 'viewcount', delta: 1, methods: Object.freeze(['incrObjectFieldBy']) }),
 ]);
 const derived = Object.freeze([
 	Object.freeze({
