@@ -1,7 +1,10 @@
 
 'use strict';
 
+const winston = require('winston');
+
 const db = require('../database');
+const atomicContext = require('../database/atomic-context');
 const posts = require('../posts');
 const categories = require('../categories');
 const privileges = require('../privileges');
@@ -90,9 +93,18 @@ module.exports = function (Topics) {
 		]);
 
 		// ideally we should federate a "move" activity instead, then can capture remote posts too. tbd
+		// Federation delivery cannot be recalled, so inside a mutation it waits for
+		// the commit that makes the fork real. Outside one the caller still awaits it.
 		if (utils.isNumber(pids[0])) {
-			const { activity } = await activitypub.mocks.activities.create(pids[0], uid);
-			await activitypub.feps.announce(pids[0], activity);
+			const announce = async () => {
+				const { activity } = await activitypub.mocks.activities.create(pids[0], uid);
+				await activitypub.feps.announce(pids[0], activity);
+			};
+			if (atomicContext.current()) {
+				atomicContext.detach(() => announce().catch(err => winston.error(err.stack)));
+			} else {
+				await announce();
+			}
 		}
 
 		plugins.hooks.fire('action:topic.fork', { tid, fromTid, uid });
